@@ -140,9 +140,7 @@ void Network::wait(int timeoutMs) {
         }
 
         // Вычисляем оставшийся таймаут
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - start)
-                           .count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         long long remaining = timeoutMs - elapsed;
         if (remaining < 0) remaining = 0;
         
@@ -191,7 +189,29 @@ void Network::poll() {
     // 1. Принимаем новых
     handleNewConnections();
 
-    // 2. Читаем данные от существующих
+    auto now = std::chrono::steady_clock::now();
+    std::vector<int> toDisconnect;
+
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex);
+        for (auto& session : sessions) {
+            if (session && session->active) {
+                // Таймаут на Handshake: 10 секунд
+                if (session->state == SessionState::WAITING_HANDSHAKE) {
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - session->connectTime).count();
+                    if (duration > 10) {
+                        toDisconnect.push_back(session->id);
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    for (int id : toDisconnect) {
+        disconnectClient(id, "Handshake Timeout", 1002);
+    }
+
     for (auto& session : sessions) {
         if (session && session->active) {
             handleClientData(*session);
@@ -212,74 +232,69 @@ void Network::handleNewConnections() {
 #endif
 
     SocketType clientSock = accept(listenSocket, (sockaddr*)&clientAddr, &len);
-    if (clientSock != INVALID_SOCKET) {
-        setNonBlocking(clientSock);
+    if (clientSock == INVALID_SOCKET) return;
 
-        std::string ip = inet_ntoa(clientAddr.sin_addr);
-
-        int maxConnPerIp = cfg ? cfg.get()->getInt("max-connections") : 3;
-        if (this->ipConnectionCount[ip] >= maxConnPerIp) {
-            const char* msg = "Too many connections from this IP";
-            send(clientSock, msg, (int)strlen(msg), 0);
-            createCloseFrame(clientSock, msg, 1008);
-#ifdef _WIN32
-            closesocket(clientSock);
-#else
-            close(clientSock);
+#ifndef _WIN32
+    // Защита от переполнения FD_SETSIZE на Linux
+    if (clientSock >= FD_SETSIZE) {
+        Logger::log(PREFIX_ERROR, "Socket FD >= FD_SETSIZE, dropping connection\n");
+        close(clientSock);
+        return;
+    }
 #endif
-            return;
-        }
 
-        int maxPlayers = cfg ? cfg.get()->getInt("max-players") : 16;
-        int currOnline = 0;
-        for (auto& s : sessions) {
-            if (s && s->active) currOnline++;
-        }
-        if (currOnline > maxPlayers) {
-            const char* msg = "Server Full";
-            send(clientSock, msg, (int)strlen(msg), 0);
-            createCloseFrame(clientSock, msg, 1013);
-#ifdef _WIN32
-            closesocket(clientSock);
-#else
-            close(clientSock);
-#endif
-            return;
-        }
+    setNonBlocking(clientSock);
+    std::string ip = inet_ntoa(clientAddr.sin_addr);
 
-        // Ищем свободный ID (0..127)
-        int newId = -1;
-        for (int i = 0; i < 128; ++i) {
-            if (!sessions[i] || !sessions[i]->active) {
-                newId = i;
-                break;
-            }
+    std::lock_guard<std::mutex> lock(sessionsMutex);
+
+    int maxConnPerIp = cfg ? cfg->getInt("max-connections") : 3;
+    if (this->ipConnectionCount[ip] >= maxConnPerIp) {
+        const char* msg = "Too many connections from this IP";
+        createCloseFrame(clientSock, msg, 1008);
+        closeSocket(clientSock);
+        return;
+    }
+
+    int maxPlayers = cfg ? cfg->getInt("max-players") : 16;
+    int currOnline = 0;
+    for (auto& s : sessions) {
+        if (s && s->active && s->state == SessionState::CONNECTED) currOnline++;
+    }
+
+    if (currOnline >= maxPlayers) {
+        const char* msg = "Server Full";
+        createCloseFrame(clientSock, msg, 1013);
+        closeSocket(clientSock);
+        return;
+    }
+
+    int newId = -1;
+    for (int i = 0; i < 128; ++i) {
+        if (!sessions[i] || !sessions[i]->active) {
+            newId = i;
+            break;
         }
+    }
 
-
-        if (newId != -1) {
-            // Создаем сессию
+    if (newId != -1) {
+        if (!sessions[newId]) {
             sessions[newId] = std::make_unique<ClientSession>();
-            sessions[newId]->id = newId;
-            sessions[newId]->socket = clientSock;
-            sessions[newId]->active = true;
-            sessions[newId]->state = SessionState::WAITING_HANDSHAKE;
-            sessions[newId]->ip = ip;
-
-            ipConnectionCount[ip]++;
-            
-            // Logger::logf(PREFIX_NETWORK, "New connection ID %d, waiting for handshake...", newId);
-        } else {
-            // Сервер полон
-            const char* msg = "Server Full";
-            send(clientSock, msg, (int)strlen(msg), 0);
-            createCloseFrame(clientSock, msg, 1013);
-#ifdef _WIN32
-            closesocket(clientSock);
-#else
-            close(clientSock);
-#endif
         }
+        sessions[newId]->id = newId;
+        sessions[newId]->socket = clientSock;
+        sessions[newId]->active = true;
+        sessions[newId]->state = SessionState::WAITING_HANDSHAKE;
+        sessions[newId]->ip = ip;
+        sessions[newId]->recvBuffer.clear();
+        sessions[newId]->connectTime = std::chrono::steady_clock::now();
+
+        ipConnectionCount[ip]++;
+        Logger::logf(PREFIX_NETWORK, "New connection ID %d, waiting for handshake...\n", newId);
+    } else {
+        const char* msg = "Server Full";
+        createCloseFrame(clientSock, msg, 1013);
+        closeSocket(clientSock);
     }
 }
 
@@ -317,7 +332,7 @@ void Network::handleClientData(ClientSession& session) {
                     session.state = SessionState::CONNECTED;
                     session.recvBuffer.erase(session.recvBuffer.begin(), session.recvBuffer.begin() + headerEnd + 4);
                     
-                    // Logger::logf(PREFIX_NETWORK, "Handshake done for ID %d", session.id);
+                    Logger::logf(PREFIX_NETWORK, "Handshake done for ID %d\n", session.id);
                     if (handler) handler->onConnect(session.id);
                 }
             }
@@ -442,33 +457,39 @@ void Network::sendPacket(int clientId, const Packet& packet) {
 }
 
 void Network::disconnectClient(int clientId, const std::string& reason, uint16_t code) {
-    sessionsMutex.lock();
-    if (clientId < 0 || clientId >= 128 || !sessions[clientId] || !sessions[clientId]->active) {
-        sessionsMutex.unlock();
-        return;
-    }
-
-    bool shouldNotify = (sessions[clientId]->state == SessionState::CONNECTED);
-    SocketType sock = sessions[clientId]->socket;
-
-    if (shouldNotify) {
-        createCloseFrame(sock, reason, code);
-    }
-
-    std::string ip = sessions[clientId]->ip;
+    SocketType sock = INVALID_SOCKET;
+    bool shouldNotify = false;
     INetworkHandler* notifyHandler = handler;
 
-    ipConnectionCount[ip]--;
-    if (ipConnectionCount[ip] <= 0) {
-        ipConnectionCount.erase(ip);
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex);
+        if (clientId < 0 || clientId >= 128 || !sessions[clientId] || !sessions[clientId]->active) {
+            return;
+        }
+
+        shouldNotify = (sessions[clientId]->state == SessionState::CONNECTED);
+        sock = sessions[clientId]->socket;
+        std::string ip = sessions[clientId]->ip;
+
+        if (!ip.empty()) {
+            ipConnectionCount[ip]--;
+            if (ipConnectionCount[ip] <= 0) {
+                ipConnectionCount.erase(ip);
+            }
+        }
+
+        sessions[clientId]->active = false;
+        sessions[clientId]->recvBuffer.clear();
     }
-    sessions[clientId]->active = false;
-    sessions[clientId]->recvBuffer.clear();
 
-    sessionsMutex.unlock();
+    if (sock != INVALID_SOCKET) {
+        if (shouldNotify) {
+            createCloseFrame(sock, reason, code);
+        }
+        closeSocket(sock);
+    }
 
-    closeSocket(sock);
-    if (notifyHandler) {
+    if (shouldNotify && notifyHandler) {
         notifyHandler->onDisconnect(clientId);
     }
 }
@@ -505,6 +526,7 @@ std::string Network::getClientIp(int clientId) {
             return s->ip;
         }
     }
+    return "";
 }
 
 bool Network::sendAllLocked(SocketType sock, const void* data, size_t len) {

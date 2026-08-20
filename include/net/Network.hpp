@@ -48,6 +48,7 @@ struct ClientSession {
     SessionState state;
     std::vector<uint8_t> recvBuffer; // Буфер для склейки TCP данных
     std::string ip;
+    std::chrono::steady_clock::time_point connectTime;
 };
 
 class Network {

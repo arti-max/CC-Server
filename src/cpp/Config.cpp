@@ -35,16 +35,6 @@ void Config::load(const std::string& fname) {
         Logger::logf(PREFIX_WARNING, "File %s not found, creating default.\n", filename.c_str());
     }
 
-    // Сохраняем обратно, чтобы обновить файл (добавить новые ключи, если их нет)
-    // Но делать это нужно аккуратно, в Python это делалось сразу.
-    // Вызовем save() без блокировки, так как мы уже держим lock
-    // (пришлось бы выносить логику save в private метод, но для простоты скопируем суть)
-    
-    // Лучше просто сохранить:
-    // save() нельзя вызывать тут из-за deadlock рекурсии mutex, 
-    // поэтому просто пишем логику сохранения ниже или убираем mutex из load/save если вызовы однопоточные при старте.
-    
-    // В данном случае просто запишем файл вручную, чтобы структура сохранилась
     std::ofstream outfile(filename);
     if (outfile.is_open()) {
         outfile << "#CrossCraft server properties\n";
@@ -52,7 +42,6 @@ void Config::load(const std::string& fname) {
         // Время (как в Python os.path.getmtime, но тут просто текущее)
         std::time_t now = std::time(nullptr);
         char buf[100];
-        // Форматируем время или просто пишем timestamp
         outfile << "#" << now << "\n"; 
         
         // 1. Пишем ключи в заданном порядке

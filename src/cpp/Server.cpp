@@ -276,8 +276,8 @@ void Server::initLevel() {
     if (!loaded) {
         ConsoleLevelLoaderListener listener;
         LevelGen gen(&listener);
-        int w = 256; 
-        int h = 256; 
+        int w = 512; 
+        int h = 512; 
         int d = 64; 
         
         // Генерируем
@@ -285,6 +285,7 @@ void Server::initLevel() {
     }
     
     level->initTransient();
+    level->enableRandomTicks = this->config->getBool("enable-random-ticks");
 }
 
 void Server::saveLevel() {
@@ -381,11 +382,9 @@ void Server::onPacket(int clientId, Packet& packet) {
                 break;
         }
     } catch (const std::exception& e) {
-        Logger::logf(PREFIX_ERROR, "Exception handling packet 0x%02X from client %d: %s\n",
-                     (uint8_t)type, clientId, e.what());
+        Logger::logf(PREFIX_ERROR, "Exception handling packet 0x%02X from client %d: %s\n", (uint8_t)type, clientId, e.what());
     } catch (...) {
-        Logger::logf(PREFIX_ERROR, "Unknown exception handling packet 0x%02X from client %d\n",
-                     (uint8_t)type, clientId);
+        Logger::logf(PREFIX_ERROR, "Unknown exception handling packet 0x%02X from client %d\n", (uint8_t)type, clientId);
     }
 }
 

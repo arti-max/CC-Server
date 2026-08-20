@@ -75,10 +75,6 @@ Most commands can also be typed directly into the server console (stdin).
 
 ## Changelog:
 
-Version 1.6.5
-
-+ Possibly fixed a server bug where it wouldn't let anyone join after running for a long time
-
 Version 1.6.4
 
 + Significantly reduced idle CPU usage by optimizing the server loop and network polling

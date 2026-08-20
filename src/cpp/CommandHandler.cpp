@@ -40,10 +40,10 @@ bool CommandHandler::executeCommand(std::string& text, int clientId, bool consol
         this->privateText = true;
         if (server->adminSystem->isAdmin(clientId) || console) {
             if (server->adminSystem->op(parts[1])) {
-                returnText = format("%s now operator", parts[1]);
-                server->sendMsgToPlayer(server->findClientByUsername(parts[1]), "You now operator");
+                returnText = format("%s is now a operator", parts[1]);
+                server->sendMsgToPlayer(server->findClientByUsername(parts[1]), "You are now a operator");
             } else {
-                returnText = format("&c%s already operator", parts[1]);
+                returnText = format("&c%s is already a operator", parts[1]);
             }
         } else {
             returnText = "&cYou cannot use this command.";
@@ -55,7 +55,7 @@ bool CommandHandler::executeCommand(std::string& text, int clientId, bool consol
         this->privateText = true;
         if (server->adminSystem->isAdmin(clientId) || console) {
             if (server->adminSystem->deop(parts[1])) {
-                returnText = format("%s deopped", parts[1]);
+                returnText = format("%s was deopped", parts[1]);
                 server->sendMsgToPlayer(server->findClientByUsername(parts[1]), "You are no longer an operator");
             } else {
                 returnText = format("&c%s is not an operator", parts[1]);
@@ -72,10 +72,10 @@ bool CommandHandler::executeCommand(std::string& text, int clientId, bool consol
             if (server->adminSystem->kick(parts[1], parts.size() == 3 ? parts[2] : "")) {
                 returnText = "";
                 // returnText = format("%s kicked", parts[1]);
-                server->sendMsgToPlayer(clientId, format("&e%s kicked", parts[1]));
+                server->sendMsgToPlayer(clientId, format("&e%s was kicked", parts[1]));
                 if (parts.size() == 3) server->sendMsgToPlayer(clientId, format("&eReason: %s", parts[2]));
             } else {
-                returnText = format("&c%s cannot been kicked", parts[1]);
+                returnText = format("&c%s cannot be kicked", parts[1]);
             }
         } else {
             returnText = "&cYou cannot use this command.";
@@ -87,9 +87,9 @@ bool CommandHandler::executeCommand(std::string& text, int clientId, bool consol
         this->privateText = true;
         if (server->adminSystem->isAdmin(clientId) || console) {
             if (server->adminSystem->ban(parts[1])) {
-                returnText = format("%s banned", parts[1]);
+                returnText = format("%s was banned", parts[1]);
             } else {
-                returnText = format("&c%s already banned or bad username", parts[1]);
+                returnText = format("&c%s is already banned or has a bad username", parts[1]);
             }
         } else {
             returnText = "&cYou cannot use this command.";
@@ -103,7 +103,7 @@ bool CommandHandler::executeCommand(std::string& text, int clientId, bool consol
             if (server->adminSystem->banip(parts[1])) {
                 returnText = format("%s banned by ip", parts[1]);
             } else {
-                returnText = format("&c%s already banned by ip or bad username", parts[1]);
+                returnText = format("&c%s is already banned by ip or has a bad username", parts[1]);
             }
         } else {
             returnText = "&cYou cannot use this command.";
